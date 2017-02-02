@@ -1,26 +1,12 @@
 /**
- Copyright 2017 Gian Darren Azriel Aquino
-
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
+ * Sums app all Uber ride expenses by getting data from your Gmail
+ *
+ * How to use:
+ * Create an app and enable Gmail Api https://developers.google.com/gmail/api/quickstart/js#prerequisites
+ * Download `client_secret.json`
+ * run `npm install`
+ * run `node receipts.js`
  */
-
-// How to use:
-// * Create an app and enable Gmail API https://developers.google.com/gmail/api/quickstart/js#prerequisites
-// * Download the client_secret.json
-// * run `npm install`
-// * run `node receipts.js`
-// * watch and enjoy
-
 var fs = require('fs');
 var readline = require('readline');
 var google = require('googleapis');
@@ -30,12 +16,18 @@ var _ = require('underscore');
 var crypto = require('crypto');
 var gmail = google.gmail('v1');
 
+// Query for searching uber messages from your gmail
+var QUERY_UBER_MESSAGES = 'from:Uber Receipts';
+// Pattern for getting the cost from the message snippet
+var PATTERN_UBER_RIDE_COST = '[\\₱]\\d+.\\d+';
+// Size for concurrent message request, speeds up the program
+var CONCURRENT_MESSAGE_REQUEST_SIZE = 250;
+
 // If modifying these scopes, delete your previously saved credentials
 // at ~/.credentials/uber-receipt-gmail-token.json
 var SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
 var TOKEN_DIR = (process.env.HOME || process.env.HOMEPATH || process.env.USERPROFILE) + '/.credentials/';
 var TOKEN_PATH = TOKEN_DIR + 'uber-receipt-gmail-token.json';
-
 // Load client secrets from a local file.
 fs.readFile('client_secret.json', function processClientSecrets(err, content) {
     if (err) {
@@ -44,7 +36,7 @@ fs.readFile('client_secret.json', function processClientSecrets(err, content) {
     }
     // Authorize a client with the loaded credentials, then call the
     // Gmail API.
-    authorize(JSON.parse(content), _computeUberExpenses);
+    authorize(JSON.parse(content), computeUberExpenses);
 });
 
 /**
@@ -102,11 +94,7 @@ function getNewToken(oauth2Client, callback) {
         });
     });
 }
-/**
- * Store token to disk be used in later program executions.
- *
- * @param {Object} token The token to store to disk.
- */
+
 function storeToken(token) {
     try {
         fs.mkdirSync(TOKEN_DIR);
@@ -119,80 +107,65 @@ function storeToken(token) {
     console.log('Token stored to ' + TOKEN_PATH);
 }
 
-function _computeUberExpenses(auth) {
+function computeUberExpenses(auth, messages) {
     async.waterfall([
             function(done) {
-                _searchAllMessages(auth, 'from:Uber Receipts', function(err, result) {
-                    return done(err, result);
+                _listAllMessages(auth, QUERY_UBER_MESSAGES, function(err, messages) {
+                    return done(err, _.pluck(messages, 'id'));
                 });
             },
-            function(messages, done) {
-                var count = 0;
-                var amount = 0.00;
-                var identifiers = [];
-                async.whilst(
-                    function() {
-                        return count < messages.length;
-                    },
-                    function(callback) {
-                        _getMessage(auth, messages[count].id, function(err, result) {
-                            if (err) {
-                                return callback(err);
-                            }
-                            // may broke if uber email format changes
-                            var price = "";
-                            try {
-                                price = result.snippet.match('[\₱]\\d+.\\d+')[0].substring(1);
-                            } catch (e) {
-                                // no prices found, ie receipt is from a promotion
-                                price = "0";
-                                console.log(e);
-                                console.log(result.snippet);
-                            }
-                            // create an identifier for this due to receipts being sent multiple times
-                            var hash = crypto.createHash('md5').update(result.snippet).digest("hex");
-                            if (_.contains(identifiers, hash)) {
-                                console.log("duplicate entry found: " + price);
-                            } else {
-                                identifiers.push(hash);
-                                amount += parseInt(price);
-                                console.log("+" + price);
-                            }
-                            count++;
-                            return callback(err);
-                        });
+            function(ids, done) {
+                _getMessages(auth, ids, 'snippet', function(err, response) {
+                    return done(err, _.pluck(response, 'snippet'));
+                });
+            },
+            function(snippets, done) {
+                var expenses = [];
+                async.each(snippets, function(snippet, callback) {
+                        var expense = {};
+                        var match = snippet.match(PATTERN_UBER_RIDE_COST);
+                        if (match) expense.amount = match[0].substring(1);
+                        else expense.amount = "0.00";
+                        expense.hash = crypto.createHash('md5').update(snippet).digest('hex');
+                        expenses.push(expense);
+                        return callback();
                     },
                     function(err) {
-                        return done(err, amount);
+                        return done(err, expenses);
                     });
+            },
+            function(expenses, done) {
+                var unique = _.uniq(expenses, false, function(expense) {
+                    return expense.hash;
+                });
+                return done(null, unique);
+            },
+            function(expenses, done) {
+                var total = _.reduce(expenses, function(memo, expense) {
+                    return memo + parseFloat(expense.amount);
+                }, 0);
+                return done(null, total);
             }
         ],
         function(err, result) {
-            console.log(err);
-            console.log("Total amount computed: " + result);
+            log("Your Uber Expenses: " + result);
+            console.log();
         });
 }
 
-/**
- * Search gmail messages base on query, and fetch all results.
- *
- * @param {google.auth.OAuth2} token
- * @param {object} the query object
- * @param {function} callback to call (err, messages)
- */
-function _searchAllMessages(auth, query, done) {
+function _listAllMessages(auth, query, done) {
+    log("Searching for Messages with:" + query);
     var next = "";
     var messages = [];
     async.doWhilst(
         function(callback) {
-            _searchMessages(auth, query, next, function(err, result) {
+            _listMessages(auth, query, next, function(err, response) {
                 if (err) {
-                    return callback(err, null);
+                    return callback(err);
                 }
-                console.log("Loaded page: " + next);
-                console.log(result.messages);
-                next = result.nextPageToken;
-                messages = _.union(messages, result.messages);
+                log("Found Messages: " + messages.length + " ");
+                next = response.nextPageToken;
+                messages = _.union(messages, response.messages);
                 return callback(err, messages);
             });
         },
@@ -204,37 +177,49 @@ function _searchAllMessages(auth, query, done) {
         });
 }
 
-/**
- * Search gmail messages base on query.
- *
- * @param {google.auth.OAuth2} token
- * @param {object} the query object
- * @param {object} pagination for gmail messages
- * @param {function} callback to call (err, messages)
- */
-function _searchMessages(auth, query, next, done) {
-    gmail.users.messages.list({
-            auth: auth,
-            userId: 'me',
-            q: query,
-            pageToken: next
-        },
-        done);
+function _listMessages(auth, query, next, done) {
+    var options = {
+        q: query,
+        auth: auth,
+        userId: 'me',
+        pageToken: next
+    };
+    gmail.users.messages.list(options, done);
 }
 
-/**
- * Request the full details of the gmail message
- *
- * @param {google.auth.OAuth2} token
- * @param {object} the message id
- * @param {function} callback to call (err, message)
- */
-function _getMessage(auth, id, done) {
-    gmail.users.messages.get({
-            auth: auth,
-            userId: 'me',
-            id: id,
-            format: 'full'
-        },
-        done);
+function _getMessages(auth, ids, fields, done) {
+    var progress = 0;
+    var messages = [];
+    var queue = async.queue(function(id, callback) {
+        _getMessage(auth, id, fields, function(err, response) {
+            progress++;
+            log("Getting your Messages: " + progress + "/" + ids.length);
+            if (err) return callback(err);
+            messages.push(response);
+            return callback();
+        });
+    }, CONCURRENT_MESSAGE_REQUEST_SIZE);
+    queue.drain = function(err) {
+        return done(err, messages);
+    };
+    _.each(ids, function(id) {
+        queue.push(id);
+    });
+}
+
+function _getMessage(auth, id, fields, done) {
+    var options = {
+        id: id,
+        auth: auth,
+        userId: 'me',
+        fields: fields,
+        format: 'full'
+    };
+    gmail.users.messages.get(options, done);
+}
+
+function log(message) {
+    process.stdout.clearLine();
+    process.stdout.cursorTo(0);
+    process.stdout.write(message);
 }
