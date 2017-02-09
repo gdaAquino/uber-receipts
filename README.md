@@ -6,11 +6,7 @@ Note: this is just my rush project to compute my expenses :)
 * Create an app and enable Gmail api https://developers.google.com/gmail/api/quickstart/js#prerequisites
 * Download the client_secret.json
 * run `npm install`
-* run `node receipts.js`
-
-### Improvements:
-* Faster computation due to sequential get message.
-* Support to specify start and end date
+* run `node receipts.js` or run `npm receipts.js yyyy/mm/dd yyyy/mm/dd` eg.2017/01/01
 
 ### License
 ```

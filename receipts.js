@@ -5,7 +5,7 @@
  * Create an app and enable Gmail Api https://developers.google.com/gmail/api/quickstart/js#prerequisites
  * Download `client_secret.json`
  * run `npm install`
- * run `node receipts.js`
+ * run `node receipts.js` or `node receipts.js begin-date end-date` in yyyy/mm/dd format. eg 2017/01/25
  */
 var fs = require('fs');
 var readline = require('readline');
@@ -110,6 +110,9 @@ function storeToken(token) {
 function computeUberExpenses(auth, messages) {
     async.waterfall([
             function(done) {
+                if (process.argv.length == 4) {
+                    QUERY_UBER_MESSAGES += " date-begin:" + process.argv[2] + " date-end:" + process.argv[3];
+                }
                 _listAllMessages(auth, QUERY_UBER_MESSAGES, function(err, messages) {
                     return done(err, _.pluck(messages, 'id'));
                 });
