@@ -1,12 +1,15 @@
 # uber-receipts
-Sums up all your Uber expenses by getting data from receipts on your Gmail.
-Note: this is just my rush project to compute my expenses :)
+Sums up all your Uber expenses by getting data from receipts on your Gmail Account.
+
+### Note:
+* Currently works for ₱ (Philippine Peso) Currency as I use it for myself. But you can change it to work for yours by editing `var PATTERN_UBER_RIDE_COST = '[\\₱]\\d+.\\d+';`
+* Does not support multiple currency.
 
 ### How to use:
 * Create an app and enable Gmail api https://developers.google.com/gmail/api/quickstart/js#prerequisites
 * Download the client_secret.json
 * run `npm install`
-* run `node receipts.js` or run `npm receipts.js yyyy/mm/dd yyyy/mm/dd` eg.2017/01/01
+* run `node receipts.js` or run `node receipts.js yyyy/mm/dd yyyy/mm/dd` eg.2017/01/01
 
 ### License
 ```
